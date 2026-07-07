@@ -1,0 +1,15 @@
+{
+  "name": "Football Predictions - AI Match Analysis",
+  "short_name": "Football AI",
+  "description": "AI-powered football match predictions with ML insights",
+  "theme_color": "#1e1b4b",
+  "background_color": "#0f172a",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

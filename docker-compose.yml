@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: football-postgres
+    environment:
+      POSTGRES_DB: football_predictions
+      POSTGRES_USER: football_user
+      POSTGRES_PASSWORD: football_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # alembic is Python scripts, not SQL; seed via backend
+      # - ./backend/alembic:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U football_user -d football_predictions"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: football-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: football-backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://football_user:football_pass@postgres:5432/football_predictions
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=your-secret-key-change-in-production
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - API_FOOTBALL_KEY=${API_FOOTBALL_KEY}
+      - FOOTBALL_DATA_KEY=${FOOTBALL_DATA_KEY}
+      - ENVIRONMENT=development
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: football-frontend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  ml-trainer:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile
+    container_name: football-ml-trainer
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://football_user:football_pass@postgres:5432/football_predictions
+      - ML_MODEL_PATH=/app/models
+    volumes:
+      - ./ml:/app
+      - ml_models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: python -m training.train
+
+volumes:
+  postgres_data:
+  redis_data:
+  ml_models:
+
+networks:
+  default:
+    name: football-network

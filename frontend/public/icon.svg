@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e1b4b"/>
+      <stop offset="100%" style="stop-color:#312e81"/>
+    </linearGradient>
+    <linearGradient id="ball" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24"/>
+      <stop offset="100%" style="stop-color:#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+  <!-- Football field background -->
+  <ellipse cx="256" cy="280" rx="180" ry="140" fill="#065f46" opacity="0.3"/>
+  <!-- Trophy / Shield -->
+  <path d="M256 120c-40 0-80 20-80 60v30c0 80 35 140 80 170 45-30 80-90 80-170v-30c0-40-40-60-80-60z" fill="url(#ball)" opacity="0.9"/>
+  <path d="M200 180l-15-25h142l-15 25-16-20-16 25-15-20-16 25-16-20-16 25-17-20-16 25z" fill="#fff" opacity="0.9"/>
+  <!-- Text -->
+  <text x="256" y="400" text-anchor="middle" fill="white" font-family="Arial" font-size="32" font-weight="bold">FOOTBALL</text>
+  <text x="256" y="440" text-anchor="middle" fill="#a5b4fc" font-family="Arial" font-size="20">Predictions</text>
+</svg>
