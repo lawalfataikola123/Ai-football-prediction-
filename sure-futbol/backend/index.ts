@@ -5,10 +5,10 @@ type Pick = { market: string; selection: string; odds: number; analysisSupported
 type Game = { id: number; league: string; home: string; away: string; picks: Pick[]; confidence: string; analysisScore: number; analysisEvidence: string; h2hEvidence: string; sources: string[]; fixtureDate: string };
 type Source = { name: string; urls: (today: string) => string[] };
 const sources: Source[] = [
-  { name: 'Footballzz 1X2', urls: () => ['https://footballzz.co.uk/full-time-1X2-football-predictions-and-statistics/2026-08-30'] },
-  { name: 'Footballzz Goals', urls: () => ['https://footballzz.co.uk/over-under-goals-football-predictions-and-statistics/2026-06-15'] },
-  { name: 'Footballzz BTTS', urls: () => ['https://footballzz.co.uk/both-teams-to-score-football-predictions-and-statistics/2026-09-03'] },
-  { name: 'Footballzz Streaks', urls: () => ['https://footballzz.co.uk/win-draw-lose-team-streaks-performance-football-predictions-and-statistics/2026-09-03'] },
+  { name: 'Footballzz 1X2', urls: today => [`https://footballzz.co.uk/full-time-1X2-football-predictions-and-statistics/${today}`] },
+  { name: 'Footballzz Goals', urls: today => [`https://footballzz.co.uk/over-under-goals-football-predictions-and-statistics/${today}`] },
+  { name: 'Footballzz BTTS', urls: today => [`https://footballzz.co.uk/both-teams-to-score-football-predictions-and-statistics/${today}`] },
+  { name: 'Footballzz Streaks', urls: today => [`https://footballzz.co.uk/win-draw-lose-team-streaks-performance-football-predictions-and-statistics/${today}`] },
   { name: 'Futbol24', urls: () => ['https://www.futbol24.com/All-Matches/'] },
   { name: 'Soccerway', urls: () => ['https://www.soccerway.com/'] },
   { name: 'Flashscore Club Friendly', urls: () => ['https://www.flashscore.com/football/world/club-friendly/fixtures/'] },
