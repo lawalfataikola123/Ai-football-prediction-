@@ -9,7 +9,9 @@ const sources: Source[] = [
   { name: 'Footballzz Goals', urls: today => [`https://footballzz.co.uk/over-under-goals-football-predictions-and-statistics/${today}`] },
   { name: 'Footballzz BTTS', urls: today => [`https://footballzz.co.uk/both-teams-to-score-football-predictions-and-statistics/${today}`] },
   { name: 'Footballzz Streaks', urls: today => [`https://footballzz.co.uk/win-draw-lose-team-streaks-performance-football-predictions-and-statistics/${today}`] },
-  { name: 'Futbol24', urls: () => ['https://www.futbol24.com/All-Matches/'] },
+  { name: 'Footballzz First Half', urls: today => [`https://footballzz.co.uk/over-under-first-half-goals-football-predictions-and-statistics/${today}`] },
+  { name: 'Futbol24 Desktop', urls: () => ['https://www.futbol24.com/All-Matches/'] },
+  { name: 'Futbol24 Mobile', urls: () => ['https://futbol24.mobi/live'] },
   { name: 'Soccerway', urls: () => ['https://www.soccerway.com/'] },
   { name: 'Flashscore Club Friendly', urls: () => ['https://www.flashscore.com/football/world/club-friendly/fixtures/'] },
   { name: 'Flashscore Ligue 3', urls: () => ['https://www.flashscore.com/football/france/ligue-3/fixtures/'] },
@@ -18,7 +20,9 @@ const sources: Source[] = [
   { name: 'Ontour Football', urls: today => [`https://ontourfootball.com/fixtures?date=${today}`] },
   { name: 'Playmakerstats', urls: () => ['https://www.playmakerstats.com/football/all-games'] },
   { name: 'FootballInfo', urls: () => ['https://www.footballinfo.net/'] },
-  { name: 'Footballwood', urls: () => ['https://www.footballwood.com/fixtures/'] }
+  { name: 'Footballwood', urls: () => ['https://www.footballwood.com/fixtures/'] },
+  { name: 'SoccerStats247', urls: today => [`https://www.soccerstats247.com/matches/${today}/`] },
+  { name: 'RotaScore', urls: () => ['https://www.rotascore.com/'] }
 ];
 const allowed = ['HW','AW','HTS','ATS','GG','O1.5','O2.5'];
 const priority = ['O1.5','GG','HW','AW','HTS','ATS','O2.5'];
@@ -32,13 +36,13 @@ export const handler = router({
     const today = lagosToday();
     const jobs = sources.flatMap(source => source.urls(today).map(url => ({ name: source.name, url })));
     const collected = (await Promise.all(jobs.map(async source => {
-      try { const page = await ai.scrape({ url: source.url }); return page.status >= 200 && page.status < 400 && page.text ? { ...source, text: page.text.slice(0, 30000) } : null; }
+      try { const page = await ai.scrape({ url: source.url }); return page.status >= 200 && page.status < 400 && page.text ? { ...source, text: page.text.slice(0, 50000) } : null; }
       catch (e) { console.warn(`Scrape failed: ${source.name}`, e); return null; }
     }))).filter((x): x is { name: string; url: string; text: string } => x !== null);
-    if (!collected.length) return json({ games: [], date: today, status: `The football sources could not be reached. No games were invented. Lagos date: ${today}.` });
+    if (!collected.length) return json({ games: [], date: today, status: `The football sources could not be reached. No games were invented. Lagos date: ${today}.`, diagnostics: { attemptedSources: jobs.length, reachedSources: 0, extractedGroups: 0 } });
     const extractedGroups = (await Promise.all(collected.map(async source => {
       try {
-        const prompt = `Today is ${today} in Africa/Lagos. Source: ${source.name}. Extract ONLY real football fixtures explicitly scheduled for ${today}. Include major, minor, lower, youth, reserve, women and regional competitions. Never invent dates or fixtures. Extract explicit odds only for HW, AW, HTS, ATS, GG, O1.5 and O2.5; never calculate or estimate odds. For each fixture use recent form, scoring/conceding trends, home/away performance, team news and H2H evidence only when actually present. Return JSON with games containing fixtureDate, league, home, away, dateEvidence, sourceName, analysisScore, analysisEvidence, h2hEvidence and picks. For odds 1.20-1.60 the pick is eligible. Above 1.60 is eligible only when BOTH analysis and H2H support that exact market and analysisSupported=true. SOURCE TEXT:\n${source.text}`;
+        const prompt = `Today is ${today} in Africa/Lagos. Source: ${source.name}. Extract ONLY real football fixtures explicitly scheduled for ${today}. IMPORTANT: search broadly through the source and include minor, lower, reserve, youth, women, regional, semi-professional and obscure leagues, not only top leagues. Do not stop after finding famous leagues. Never invent dates or fixtures. Extract explicit odds only for HW, AW, HTS, ATS, GG, O1.5 and O2.5; never calculate or estimate odds. For each fixture use recent form, scoring/conceding trends, home/away performance, team news and H2H evidence only when actually present. Return JSON with games containing fixtureDate, league, home, away, dateEvidence, sourceName, analysisScore, analysisEvidence, h2hEvidence and picks. For odds 1.20-1.60 the pick is eligible. Above 1.60 is eligible only when BOTH analysis and H2H support that exact market and analysisSupported=true. Prefer breadth across leagues while retaining only fixtures with enough explicit market odds for at least two qualifying picks. SOURCE TEXT:\n${source.text}`;
         const result = await ai.generate({ prompt, maxTokens: 8192, temperature: 0, thinkingMode: 'FAST', schema: { type: 'object', properties: { games: { type: 'array', items: { type: 'object', properties: { fixtureDate: { type: 'string' }, league: { type: 'string' }, home: { type: 'string' }, away: { type: 'string' }, dateEvidence: { type: 'string' }, sourceName: { type: 'string' }, analysisScore: { type: 'number' }, analysisEvidence: { type: 'string' }, h2hEvidence: { type: 'string' }, picks: { type: 'array', items: { type: 'object', properties: { market: { type: 'string' }, selection: { type: 'string' }, odds: { type: 'number' }, analysisSupported: { type: 'boolean' } }, required: ['market','selection','odds','analysisSupported'] } } }, required: ['fixtureDate','league','home','away','dateEvidence','sourceName','analysisScore','analysisEvidence','h2hEvidence','picks'] } } }, required: ['games'] } });
         try { return JSON.parse(result.text); } catch { return JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()); }
       } catch (e) { console.warn(`Extraction failed: ${source.name}`, e); return null; }
@@ -56,6 +60,6 @@ export const handler = router({
     }
     const unique = [...merged.values()].map(g => ({ ...g, picks: g.picks.filter((p,i,a) => a.findIndex(q => q.market === p.market) === i).sort((a,b) => priority.indexOf(a.market)-priority.indexOf(b.market)) })).filter(g => g.picks.length >= 2).slice(0, limit).map((g,i) => ({ ...g, id: i + 1 }));
     const sourceNames = [...new Set(collected.map(s => s.name))].join(', ');
-    return json({ games: unique, date: today, status: unique.length ? `Verified ${unique.length} qualifying fixtures for ${today} in Lagos time from ${sourceNames}.` : `Sources were reached (${sourceNames}), but no fixture survived the explicit odds and two-pick rules for ${today}.` });
+    return json({ games: unique, date: today, status: unique.length ? `Verified ${unique.length} qualifying fixtures for ${today} in Lagos time across ${collected.length} sources, with broad minor/lower-league coverage.` : `Sources were reached (${sourceNames}), but no fixture survived the explicit odds and two-pick rules for ${today}.`, diagnostics: { attemptedSources: jobs.length, reachedSources: collected.length, extractedGroups: extractedGroups.length, qualifyingGames: unique.length } });
   }]
 });
