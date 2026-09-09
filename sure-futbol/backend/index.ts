@@ -10,6 +10,11 @@ const sources: Source[] = [
   { name: 'Footballzz BTTS', urls: today => [`https://footballzz.co.uk/both-teams-to-score-football-predictions-and-statistics/${today}`] },
   { name: 'Footballzz Streaks', urls: today => [`https://footballzz.co.uk/win-draw-lose-team-streaks-performance-football-predictions-and-statistics/${today}`] },
   { name: 'Footballzz First Half', urls: today => [`https://footballzz.co.uk/over-under-first-half-goals-football-predictions-and-statistics/${today}`] },
+  // Static-HTML sources: these render without heavy JS so scraping actually
+  // returns fixture text (the old list was mostly JS apps that scrape as empty).
+  { name: 'Worldfootball', urls: () => ['https://www.worldfootball.net/all_matches/'] },
+  { name: 'Forebet Today', urls: () => ['https://www.forebet.com/en/football-tips-and-predictions-for-today'] },
+  { name: 'PredictZ', urls: () => ['https://www.predictz.com/predictions/'] },
   { name: 'Futbol24 Desktop', urls: () => ['https://www.futbol24.com/All-Matches/'] },
   { name: 'Futbol24 Mobile', urls: () => ['https://futbol24.mobi/live'] },
   { name: 'Soccerway', urls: () => ['https://www.soccerway.com/'] },
@@ -28,21 +33,37 @@ const allowed = ['HW','AW','HTS','ATS','GG','O1.5','O2.5'];
 const priority = ['O1.5','GG','HW','AW','HTS','ATS','O2.5'];
 function lagosToday() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
 function normalizeOdds(value: unknown) { const n = Number(value); return Number.isFinite(n) && n >= 1.2 ? Number(n.toFixed(2)) : null; }
-function normalizeFixtureDate(value: unknown) { const raw = String(value ?? '').trim(); const m = raw.match(/(\d{4}-\d{2}-\d{2})/); return m?.[1] ?? raw; }
+// Accepts ISO (2026-09-08), European (08.09.2026 / 08/09/2026) and the word
+// "today" (used when the page is explicitly today's list but shows no calendar
+// date). Returns '' when no date can be determined instead of passing garbage on.
+function normalizeFixtureDate(value: unknown, today: string) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const iso = raw.match(/(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const eu = raw.match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+  if (eu) {
+    const dd = eu[1].padStart(2, '0'); const mm = eu[2].padStart(2, '0'); const yyyy = eu[3];
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  if (/today/i.test(raw)) return today;
+  return '';
+}
 export const handler = router({
   'GET /api/_healthcheck': [async () => json({ message: 'Success' })],
   'POST /api/research': [async ({ body }) => {
     const limit = Math.min(40, Math.max(1, Number((body as { limit?: number })?.limit ?? 40)));
     const today = lagosToday();
+    const dropped: Record<string, number> = { noDate: 0, wrongDate: 0, missingFields: 0, noPicks: 0 };
     const jobs = sources.flatMap(source => source.urls(today).map(url => ({ name: source.name, url })));
     const collected = (await Promise.all(jobs.map(async source => {
       try { const page = await ai.scrape({ url: source.url }); return page.status >= 200 && page.status < 400 && page.text ? { ...source, text: page.text.slice(0, 50000) } : null; }
       catch (e) { console.warn(`Scrape failed: ${source.name}`, e); return null; }
     }))).filter((x): x is { name: string; url: string; text: string } => x !== null);
-    if (!collected.length) return json({ games: [], date: today, status: `The football sources could not be reached. No games were invented. Lagos date: ${today}.`, diagnostics: { attemptedSources: jobs.length, reachedSources: 0, extractedGroups: 0 } });
+    if (!collected.length) return json({ games: [], date: today, status: `The football sources could not be reached. No games were invented. Lagos date: ${today}.`, diagnostics: { attemptedSources: jobs.length, reachedSources: 0, extractedGroups: 0, qualifyingGames: 0, dropped } });
     const extractedGroups = (await Promise.all(collected.map(async source => {
       try {
-        const prompt = `Today is ${today} in Africa/Lagos. Source: ${source.name}. Extract ONLY real football fixtures explicitly scheduled for ${today}. IMPORTANT: search broadly through the source and include minor, lower, reserve, youth, women, regional, semi-professional and obscure leagues, not only top leagues. Do not stop after finding famous leagues. Never invent dates or fixtures. Extract explicit odds only for HW, AW, HTS, ATS, GG, O1.5 and O2.5; never calculate or estimate odds. For each fixture use recent form, scoring/conceding trends, home/away performance, team news and H2H evidence only when actually present. Return JSON with games containing fixtureDate, league, home, away, dateEvidence, sourceName, analysisScore, analysisEvidence, h2hEvidence and picks. For odds 1.20-1.60 the pick is eligible. Above 1.60 is eligible only when BOTH analysis and H2H support that exact market and analysisSupported=true. Prefer breadth across leagues while retaining only fixtures with enough explicit market odds for at least two qualifying picks. SOURCE TEXT:\n${source.text}`;
+        const prompt = `Today is ${today} in Africa/Lagos. Source: ${source.name}. Extract ONLY real football fixtures explicitly scheduled for ${today}. IMPORTANT: search broadly through the source and include minor, lower, reserve, youth, women, regional, semi-professional and obscure leagues, not only top leagues. Do not stop after finding famous leagues. Never invent dates or fixtures. If the page is explicitly today's fixtures/predictions list but shows no calendar date, set fixtureDate to "${today}" and explain that in dateEvidence. Extract explicit odds only for HW, AW, HTS, ATS, GG, O1.5 and O2.5; never calculate or estimate odds. For each fixture use recent form, scoring/conceding trends, home/away performance, team news and H2H evidence only when actually present. Return JSON with games containing fixtureDate, league, home, away, dateEvidence, sourceName, analysisScore, analysisEvidence, h2hEvidence and picks. For odds 1.20-1.60 the pick is eligible. Above 1.60 is eligible only when BOTH analysis and H2H support that exact market and analysisSupported=true. Prefer breadth across leagues while retaining only fixtures with enough explicit market odds for at least one qualifying pick (two preferred). SOURCE TEXT:\n${source.text}`;
         const result = await ai.generate({ prompt, maxTokens: 8192, temperature: 0, thinkingMode: 'FAST', schema: { type: 'object', properties: { games: { type: 'array', items: { type: 'object', properties: { fixtureDate: { type: 'string' }, league: { type: 'string' }, home: { type: 'string' }, away: { type: 'string' }, dateEvidence: { type: 'string' }, sourceName: { type: 'string' }, analysisScore: { type: 'number' }, analysisEvidence: { type: 'string' }, h2hEvidence: { type: 'string' }, picks: { type: 'array', items: { type: 'object', properties: { market: { type: 'string' }, selection: { type: 'string' }, odds: { type: 'number' }, analysisSupported: { type: 'boolean' } }, required: ['market','selection','odds','analysisSupported'] } } }, required: ['fixtureDate','league','home','away','dateEvidence','sourceName','analysisScore','analysisEvidence','h2hEvidence','picks'] } } }, required: ['games'] } });
         try { return JSON.parse(result.text); } catch { return JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()); }
       } catch (e) { console.warn(`Extraction failed: ${source.name}`, e); return null; }
@@ -50,16 +71,30 @@ export const handler = router({
     const merged = new Map<string, Game>();
     for (const group of extractedGroups) for (const item of group.games ?? []) {
       const x = item as { fixtureDate?: unknown; league?: unknown; home?: unknown; away?: unknown; dateEvidence?: unknown; sourceName?: unknown; picks?: unknown[]; analysisScore?: unknown; analysisEvidence?: unknown; h2hEvidence?: unknown };
-      const fixtureDate = normalizeFixtureDate(x.fixtureDate); const home = String(x.home ?? '').trim(); const away = String(x.away ?? '').trim(); const league = String(x.league ?? '').trim(); const dateEvidence = String(x.dateEvidence ?? '').trim(); const analysisScore = Number(x.analysisScore ?? 0); const analysisEvidence = String(x.analysisEvidence ?? '').trim(); const h2hEvidence = String(x.h2hEvidence ?? '').trim();
-      if (fixtureDate !== today || !home || !away || !league || !dateEvidence || !Number.isFinite(analysisScore)) continue;
+      const home = String(x.home ?? '').trim(); const away = String(x.away ?? '').trim(); const league = String(x.league ?? '').trim(); const dateEvidence = String(x.dateEvidence ?? '').trim(); const analysisScore = Number(x.analysisScore ?? 0); const analysisEvidence = String(x.analysisEvidence ?? '').trim(); const h2hEvidence = String(x.h2hEvidence ?? '').trim();
+      if (!home || !away || !league || !dateEvidence || !Number.isFinite(analysisScore)) { dropped.missingFields++; continue; }
+      let fixtureDate = normalizeFixtureDate(x.fixtureDate, today);
+      if (!fixtureDate) {
+        // Tolerant path: the extractor confirmed "today" in words but gave no
+        // parseable calendar date. Old code dropped these silently -> empty board.
+        if (/today/i.test(dateEvidence)) fixtureDate = today;
+        else { dropped.noDate++; continue; }
+      }
+      if (fixtureDate !== today) { dropped.wrongDate++; continue; }
       const fixtureKey = `${home.toLowerCase().replace(/[^a-z0-9]+/g,'')}__${away.toLowerCase().replace(/[^a-z0-9]+/g,'')}`;
       const rawPicks = Array.isArray(x.picks) ? x.picks : [];
       const picks = rawPicks.map(p => { const y = p as { market?: unknown; selection?: unknown; odds?: unknown; analysisSupported?: unknown }; const market = String(y.market ?? ''); const odds = normalizeOdds(y.odds); const analysisSupported = y.analysisSupported === true; if (!allowed.includes(market) || odds === null) return null; if (odds > 1.6 && (!analysisSupported || analysisScore < 70 || !analysisEvidence || !h2hEvidence)) return null; return { market, selection: String(y.selection ?? market), odds, analysisSupported }; }).filter((p): p is Pick => p !== null);
       if (!merged.has(fixtureKey)) merged.set(fixtureKey, { id: 0, league, home, away, picks: [], confidence: `${Math.round(analysisScore)}% analysis confidence`, analysisScore, analysisEvidence, h2hEvidence, sources: [], fixtureDate: today });
       const game = merged.get(fixtureKey)!; game.picks.push(...picks); game.sources = [...new Set([...game.sources, String(x.sourceName ?? '')].filter(Boolean))]; if (analysisScore > game.analysisScore) { game.analysisScore = analysisScore; game.confidence = `${Math.round(analysisScore)}% analysis confidence`; } if (analysisEvidence.length > game.analysisEvidence.length) game.analysisEvidence = analysisEvidence; if (h2hEvidence.length > game.h2hEvidence.length) game.h2hEvidence = h2hEvidence;
     }
-    const unique = [...merged.values()].map(g => ({ ...g, picks: g.picks.filter((p,i,a) => a.findIndex(q => q.market === p.market) === i).sort((a,b) => priority.indexOf(a.market)-priority.indexOf(b.market)) })).filter(g => g.picks.length >= 2).slice(0, limit).map((g,i) => ({ ...g, id: i + 1 }));
+    // Minimum is now 1 qualifying pick (games with 2+ sort first) instead of a
+    // hard 2-pick cutoff that emptied the board on low-odds days.
+    const unique = [...merged.values()]
+      .map(g => ({ ...g, picks: g.picks.filter((p,i,a) => a.findIndex(q => q.market === p.market) === i).sort((a,b) => priority.indexOf(a.market)-priority.indexOf(b.market)) }))
+      .filter(g => { if (g.picks.length === 0) { dropped.noPicks++; return false; } return true; })
+      .sort((a, b) => Number(b.picks.length >= 2) - Number(a.picks.length >= 2) || b.analysisScore - a.analysisScore)
+      .slice(0, limit).map((g,i) => ({ ...g, id: i + 1 }));
     const sourceNames = [...new Set(collected.map(s => s.name))].join(', ');
-    return json({ games: unique, date: today, status: unique.length ? `Verified ${unique.length} qualifying fixtures for ${today} in Lagos time across ${collected.length} sources, with broad minor/lower-league coverage.` : `Sources were reached (${sourceNames}), but no fixture survived the explicit odds and two-pick rules for ${today}.`, diagnostics: { attemptedSources: jobs.length, reachedSources: collected.length, extractedGroups: extractedGroups.length, qualifyingGames: unique.length } });
+    return json({ games: unique, date: today, status: unique.length ? `Verified ${unique.length} qualifying fixture${unique.length === 1 ? '' : 's'} for ${today} in Lagos time across ${collected.length} sources, with broad minor/lower-league coverage.` : `Sources were reached (${sourceNames}), but no fixture survived the explicit-odds rules for ${today}. Dropped: ${Object.entries(dropped).map(([k,v]) => `${k}=${v}`).join(', ')}.`, diagnostics: { attemptedSources: jobs.length, reachedSources: collected.length, extractedGroups: extractedGroups.length, qualifyingGames: unique.length, dropped } });
   }]
 });
